@@ -1,3 +1,4 @@
+services:
   - type: web
     name: ghi-api
     env: python
