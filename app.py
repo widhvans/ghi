@@ -7,7 +7,7 @@ import requests
 import time
 import threading
 import os
-import gc  # Garbage collection for memory
+import gc
 
 app = Flask(__name__)
 
@@ -27,7 +27,7 @@ def load_model():
             )
             pipe.to("cpu")
             pipe.enable_attention_slicing()
-            pipe.enable_sequential_cpu_offload()  # Memory ko optimize karega
+            pipe.enable_sequential_cpu_offload()
             print("Model load ho gaya!")
             return pipe
         except Exception as e:
@@ -43,7 +43,6 @@ pipe = load_model()
 @app.route('/health', methods=['GET'])
 def health_check():
     try:
-        # Simple check to ensure model is alive
         if pipe is not None:
             return "OK", 200
         else:
@@ -60,7 +59,8 @@ def generate_ghibli_image(image, pipe, strength):
     start_time = time.time()
     result = pipe(prompt=prompt, image=image, strength=strength, num_inference_steps=10).images[0]
     print(f"Image {time.time() - start_time:.2f} seconds mein generate hui!")
-    gc.collect()  # Clear memory after generation
+    gc.collect()
+    torch.cuda.empty_cache() if torch.cuda.is_available() else None  # Clear GPU memory if any
     return result
 
 @app.route('/generate', methods=['GET', 'POST'])
@@ -114,15 +114,16 @@ def generate_image():
         return "Internal error, retrying...", 500
 
 def keep_alive():
+    url = f"http://localhost:{os.environ.get('PORT', 8080)}/health"
     while True:
         print("Keeping alive...")
         try:
-            requests.get("https://ghi-jsfj.onrender.com/health", timeout=10)  # Self-ping
+            requests.get(url, timeout=10)
         except Exception as e:
             print(f"Keep-alive ping failed: {e}")
-        time.sleep(300)  # 5 minutes—Render free tier ke liye safe
+        time.sleep(300)  # 5 minutes
 
 if __name__ == '__main__':
     threading.Thread(target=keep_alive, daemon=True).start()
-    port = int(os.environ.get("PORT", 8080))  # Render PORT env
+    port = int(os.environ.get("PORT", 8080))  # Render ka dynamic PORT
     app.run(host='0.0.0.0', port=port)
