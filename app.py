@@ -3,6 +3,7 @@ from diffusers import StableDiffusionImg2ImgPipeline
 import torch
 from PIL import Image
 import io
+import requests
 import time
 
 app = Flask(__name__)
@@ -29,29 +30,47 @@ def generate_ghibli_image(image, pipe, strength):
     print(f"Image {time.time() - start_time:.2f} seconds mein generate hui!")
     return result
 
-# Model ko globally load karo
+# Model globally load karo
 pipe = load_model()
 
-# API endpoint banayein
-@app.route('/generate', methods=['POST'])
+# API endpoint (GET aur POST dono)
+@app.route('/generate', methods=['GET', 'POST'])
 def generate_image():
-    if 'file' not in request.files:
-        return "Koi file upload nahi ki gayi!", 400
-    
-    file = request.files['file']
-    strength = float(request.form.get('strength', 0.6))  # Default strength 0.6
-    
-    # File ko image mein convert karo
-    image = Image.open(file.stream)
-    
+    strength = float(request.args.get('strength', 0.6) if request.method == 'GET' else request.form.get('strength', 0.6))
+
+    # GET request ke liye URL se image
+    if request.method == 'GET':
+        image_url = request.args.get('imageUrl')
+        if not image_url:
+            return "Image URL nahi diya!", 400
+        response = requests.get(image_url)
+        if response.status_code != 200:
+            return "Image URL se download nahi hua!", 400
+        image = Image.open(io.BytesIO(response.content))
+
+    # POST request ke liye file ya URL
+    elif request.method == 'POST':
+        if 'file' in request.files and request.files['file'].filename != '':
+            file = request.files['file']
+            image = Image.open(file.stream)
+        elif 'image_url' in request.form and request.form['image_url']:
+            url = request.form['image_url']
+            response = requests.get(url)
+            if response.status_code == 200:
+                image = Image.open(io.BytesIO(response.content))
+            else:
+                return "Image URL se download nahi hua!", 400
+        else:
+            return "Koi file ya URL nahi diya!", 400
+
     # Ghibli image generate karo
     result_img = generate_ghibli_image(image, pipe, strength)
-    
+
     # Result ko save karo aur bhejo
     output = io.BytesIO()
     result_img.save(output, format="PNG")
     output.seek(0)
-    
+
     return send_file(output, mimetype='image/png', as_attachment=True, download_name='ghibli_image.png')
 
 if __name__ == '__main__':
