@@ -6,12 +6,13 @@ import io
 import requests
 import time
 import threading
+import os
 
 app = Flask(__name__)
 
 def load_model():
     model_id = "runwayml/stable-diffusion-v1-5"  # Lightweight model
-    dtype = torch.float32  # CPU ke liye float32, GPU ke liye float16 ho sakta hai
+    dtype = torch.float32  # CPU only for Render free tier
     print("Model ko load kar raha hoon...")
     retries = 5
     for attempt in range(retries):
@@ -19,18 +20,19 @@ def load_model():
             pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
                 model_id,
                 torch_dtype=dtype,
-                low_cpu_mem_usage=True,  # Memory optimize
-                safety_checker=None  # Speed ke liye optional
+                low_cpu_mem_usage=True,
+                safety_checker=None,
+                cache_dir="/tmp/model_cache"  # Cache for faster reload
             )
-            pipe.to("cpu")  # Koyeb free tier mein GPU nahi
-            pipe.enable_attention_slicing()  # Memory aur speed ke liye
+            pipe.to("cpu")
+            pipe.enable_attention_slicing()
             print("Model load ho gaya!")
             return pipe
         except Exception as e:
             print(f"Attempt {attempt + 1}/{retries} failed: {e}")
             if attempt < retries - 1:
-                print("Retrying in 10 seconds...")
-                time.sleep(10)
+                print("Retrying in 5 seconds...")
+                time.sleep(5)
             else:
                 raise Exception("Model loading failed after retries")
 
@@ -58,7 +60,7 @@ def generate_image():
         image_url = request.args.get('imageUrl')
         if not image_url:
             return "Image URL nahi diya!", 400
-        for _ in range(3):  # Retry image download
+        for _ in range(3):
             try:
                 response = requests.get(image_url, timeout=10)
                 if response.status_code == 200:
@@ -107,4 +109,6 @@ def keep_alive():
 
 if __name__ == '__main__':
     threading.Thread(target=keep_alive, daemon=True).start()
-    app.run(host='0.0.0.0', port=8080)
+    port = int(os.environ.get("PORT", 8080))  # Render PORT env use karega
+    app.run(host='0.0.0.0', port=port)
+
