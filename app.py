@@ -7,12 +7,13 @@ import requests
 import time
 import threading
 import os
+import gc  # Garbage collection for memory
 
 app = Flask(__name__)
 
 def load_model():
-    model_id = "runwayml/stable-diffusion-v1-5"  # Lightweight model
-    dtype = torch.float32  # CPU only for Render free tier
+    model_id = "runwayml/stable-diffusion-v1-5"
+    dtype = torch.float32
     print("Model ko load kar raha hoon...")
     retries = 5
     for attempt in range(retries):
@@ -22,10 +23,11 @@ def load_model():
                 torch_dtype=dtype,
                 low_cpu_mem_usage=True,
                 safety_checker=None,
-                cache_dir="/tmp/model_cache"  # Cache for faster reload
+                cache_dir="/tmp/model_cache"
             )
             pipe.to("cpu")
             pipe.enable_attention_slicing()
+            pipe.enable_sequential_cpu_offload()  # Memory ko optimize karega
             print("Model load ho gaya!")
             return pipe
         except Exception as e:
@@ -40,7 +42,15 @@ pipe = load_model()
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    return "OK", 200
+    try:
+        # Simple check to ensure model is alive
+        if pipe is not None:
+            return "OK", 200
+        else:
+            return "Model not loaded", 500
+    except Exception as e:
+        print(f"Health check failed: {e}")
+        return "Health check failed", 500
 
 def generate_ghibli_image(image, pipe, strength):
     image = image.convert("RGB")
@@ -50,6 +60,7 @@ def generate_ghibli_image(image, pipe, strength):
     start_time = time.time()
     result = pipe(prompt=prompt, image=image, strength=strength, num_inference_steps=10).images[0]
     print(f"Image {time.time() - start_time:.2f} seconds mein generate hui!")
+    gc.collect()  # Clear memory after generation
     return result
 
 @app.route('/generate', methods=['GET', 'POST'])
@@ -105,10 +116,13 @@ def generate_image():
 def keep_alive():
     while True:
         print("Keeping alive...")
-        time.sleep(60)
+        try:
+            requests.get("https://ghi-jsfj.onrender.com/health", timeout=10)  # Self-ping
+        except Exception as e:
+            print(f"Keep-alive ping failed: {e}")
+        time.sleep(300)  # 5 minutes—Render free tier ke liye safe
 
 if __name__ == '__main__':
     threading.Thread(target=keep_alive, daemon=True).start()
-    port = int(os.environ.get("PORT", 8080))  # Render PORT env use karega
+    port = int(os.environ.get("PORT", 8080))  # Render PORT env
     app.run(host='0.0.0.0', port=port)
-
