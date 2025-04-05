@@ -4,4 +4,4 @@ if [ ! -d "venv" ]; then
 fi
 source venv/bin/activate
 pip3 install -r requirements.txt
-nohup gunicorn --workers 1 --threads 4 --bind 0.0.0.0:5000 --timeout 600
+nohup gunicorn --workers 1 --threads 4 --bind 0.0.0.0:5000 --timeout 600 --preload app:app &
