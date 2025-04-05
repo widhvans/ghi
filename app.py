@@ -64,4 +64,4 @@ def generate_image():
     return send_file(output, mimetype='image/png', as_attachment=True, download_name='ghibli_image.png')
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)
+    app.run(host='0.0.0.0', port=5000)
