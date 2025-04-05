@@ -1,4 +1,3 @@
-
 from flask import Flask, request, send_file
 from diffusers import StableDiffusionImg2ImgPipeline
 import torch
@@ -7,28 +6,36 @@ import io
 import requests
 import time
 import threading
-import os
 
 app = Flask(__name__)
 
 def load_model():
-    model_id = "runwayml/stable-diffusion-v1-5"  # Lightweight model for speed
-    dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+    model_id = "runwayml/stable-diffusion-v1-5"  # Lightweight model
+    dtype = torch.float32  # CPU ke liye float32, GPU ke liye float16 ho sakta hai
     print("Model ko load kar raha hoon...")
-    while True:
+    retries = 5
+    for attempt in range(retries):
         try:
-            pipe = StableDiffusionImg2ImgPipeline.from_pretrained(model_id, torch_dtype=dtype)
-            pipe.to("cuda" if torch.cuda.is_available() else "cpu")
-            pipe.enable_attention_slicing()
+            pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
+                model_id,
+                torch_dtype=dtype,
+                low_cpu_mem_usage=True,  # Memory optimize
+                safety_checker=None  # Speed ke liye optional
+            )
+            pipe.to("cpu")  # Koyeb free tier mein GPU nahi
+            pipe.enable_attention_slicing()  # Memory aur speed ke liye
             print("Model load ho gaya!")
             return pipe
         except Exception as e:
-            print(f"Model load failed: {e}. Retrying in 10 seconds...")
-            time.sleep(10)
+            print(f"Attempt {attempt + 1}/{retries} failed: {e}")
+            if attempt < retries - 1:
+                print("Retrying in 10 seconds...")
+                time.sleep(10)
+            else:
+                raise Exception("Model loading failed after retries")
 
 pipe = load_model()
 
-# Health check endpoint to keep Koyeb happy
 @app.route('/health', methods=['GET'])
 def health_check():
     return "OK", 200
@@ -39,7 +46,7 @@ def generate_ghibli_image(image, pipe, strength):
     prompt = "Ghibli-style anime painting, soft pastel colors, highly detailed, masterpiece"
     print("Image generate kar raha hoon...")
     start_time = time.time()
-    result = pipe(prompt=prompt, image=image, strength=strength, num_inference_steps=10).images[0]  # Reduced steps for speed
+    result = pipe(prompt=prompt, image=image, strength=strength, num_inference_steps=10).images[0]
     print(f"Image {time.time() - start_time:.2f} seconds mein generate hui!")
     return result
 
@@ -51,10 +58,17 @@ def generate_image():
         image_url = request.args.get('imageUrl')
         if not image_url:
             return "Image URL nahi diya!", 400
-        response = requests.get(image_url)
-        if response.status_code != 200:
+        for _ in range(3):  # Retry image download
+            try:
+                response = requests.get(image_url, timeout=10)
+                if response.status_code == 200:
+                    image = Image.open(io.BytesIO(response.content))
+                    break
+            except Exception as e:
+                print(f"Image download failed: {e}. Retrying...")
+                time.sleep(5)
+        else:
             return "Image URL se download nahi hua!", 400
-        image = Image.open(io.BytesIO(response.content))
 
     elif request.method == 'POST':
         if 'file' in request.files and request.files['file'].filename != '':
@@ -62,9 +76,15 @@ def generate_image():
             image = Image.open(file.stream)
         elif 'image_url' in request.form and request.form['image_url']:
             url = request.form['image_url']
-            response = requests.get(url)
-            if response.status_code == 200:
-                image = Image.open(io.BytesIO(response.content))
+            for _ in range(3):
+                try:
+                    response = requests.get(url, timeout=10)
+                    if response.status_code == 200:
+                        image = Image.open(io.BytesIO(response.content))
+                        break
+                except Exception as e:
+                    print(f"Image download failed: {e}. Retrying...")
+                    time.sleep(5)
             else:
                 return "Image URL se download nahi hua!", 400
         else:
@@ -80,11 +100,10 @@ def generate_image():
         print(f"Generation failed: {e}")
         return "Internal error, retrying...", 500
 
-# Keep alive thread
 def keep_alive():
     while True:
         print("Keeping alive...")
-        time.sleep(60)  # Ping every minute to keep instance active
+        time.sleep(60)
 
 if __name__ == '__main__':
     threading.Thread(target=keep_alive, daemon=True).start()
