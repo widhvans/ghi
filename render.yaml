@@ -6,4 +6,7 @@ services:
     buildCommand: "pip install -r requirements.txt"
     startCommand: "gunicorn --workers 1 --threads 4 --timeout 600 --preload app:app"
     healthCheckPath: "/health"
+    envVars:
+      - key: PORT
+        value: 8080
     autoDeploy: true
